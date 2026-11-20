@@ -11,8 +11,11 @@ Ollama's API responses include metrics that can be used for measuring performanc
 * `prompt_eval_duration`: How long it took to evaluate the uncached prompt tokens
 * `eval_count`: How many output tokens were processes
 * `eval_duration`: How long it took to generate the output tokens
+* `gpu_energy`: How much energy the model's GPUs drew while evaluating the prompt and generating the output tokens
 
-All timing values are measured in nanoseconds.
+All timing values are measured in nanoseconds, and energy is measured in joules.
+
+`gpu_energy` is the energy of the whole GPU board, including what it draws while idle. Ollama can't see other programs using the GPU, so their draw is counted too. It is only reported on Linux, for NVIDIA GPUs with an energy counter, and only when the model runs on the GPU. It is left out when another request or model in Ollama used the same GPUs at the same time, because the board's draw can't be split between them. Models on the MLX engine don't report it, and their work on a shared GPU isn't noticed. Some GPUs update their counter only every 100 ms, so for very short responses the value is rough or missing.
 
 ## Example response
 

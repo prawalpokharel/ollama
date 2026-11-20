@@ -245,6 +245,7 @@ type ChatResponse struct {
 	PromptEvalDuration    time.Duration `json:"prompt_eval_duration"`
 	EvalCount             int           `json:"eval_count"`
 	EvalDuration          time.Duration `json:"eval_duration"`
+	GPUEnergy             float64       `json:"gpu_energy,omitempty"`
 	Logprobs              []Logprob     `json:"logprobs,omitempty"`
 }
 
@@ -289,6 +290,7 @@ type CompletionResponse struct {
 	PromptEvalDuration    time.Duration `json:"prompt_eval_duration"`
 	EvalCount             int           `json:"eval_count"`
 	EvalDuration          time.Duration `json:"eval_duration"`
+	GPUEnergy             float64       `json:"gpu_energy,omitempty"`
 
 	// Logprobs contains log probability information if requested
 	Logprobs []Logprob `json:"logprobs,omitempty"`

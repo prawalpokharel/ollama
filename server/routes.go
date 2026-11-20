@@ -775,6 +775,7 @@ func (s *Server) GenerateHandler(c *gin.Context) {
 					PromptEvalDuration:    cr.PromptEvalDuration,
 					EvalCount:             cr.EvalCount,
 					EvalDuration:          cr.EvalDuration,
+					GPUEnergy:             cr.GPUEnergy,
 				},
 				Logprobs: toAPILogprobs(cr.Logprobs),
 			}
@@ -3370,6 +3371,7 @@ func (s *Server) ChatHandler(c *gin.Context) {
 					PromptEvalDuration:    r.PromptEvalDuration,
 					EvalCount:             r.EvalCount,
 					EvalDuration:          r.EvalDuration,
+					GPUEnergy:             r.GPUEnergy,
 				},
 				Logprobs: toAPILogprobs(r.Logprobs),
 			}
@@ -3533,6 +3535,7 @@ func (s *Server) handleNativeChat(c *gin.Context, req api.ChatRequest, m *Model,
 					PromptEvalDuration:    r.PromptEvalDuration,
 					EvalCount:             r.EvalCount,
 					EvalDuration:          r.EvalDuration,
+					GPUEnergy:             r.GPUEnergy,
 				},
 				Logprobs: toAPILogprobs(r.Logprobs),
 			}

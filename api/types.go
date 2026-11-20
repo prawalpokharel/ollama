@@ -688,6 +688,7 @@ type Metrics struct {
 	PromptEvalDuration    time.Duration `json:"prompt_eval_duration,omitempty"`
 	EvalCount             int           `json:"eval_count,omitempty"`
 	EvalDuration          time.Duration `json:"eval_duration,omitempty"`
+	GPUEnergy             float64       `json:"gpu_energy,omitempty"` // joules
 }
 
 // Options specified in [GenerateRequest].  If you add a new option here, also
@@ -1230,6 +1231,10 @@ func (m *Metrics) Summary() {
 	if m.EvalDuration > 0 {
 		fmt.Fprintf(os.Stderr, "eval duration:        %s\n", m.EvalDuration)
 		fmt.Fprintf(os.Stderr, "eval rate:            %.2f tokens/s\n", float64(m.EvalCount)/m.EvalDuration.Seconds())
+	}
+
+	if m.GPUEnergy > 0 {
+		fmt.Fprintf(os.Stderr, "gpu energy:           %.2f J\n", m.GPUEnergy)
 	}
 }
 

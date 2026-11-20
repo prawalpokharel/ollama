@@ -49,6 +49,7 @@ import (
 	"github.com/ollama/ollama/envconfig"
 	"github.com/ollama/ollama/fs/gguf"
 	"github.com/ollama/ollama/ml"
+	"github.com/ollama/ollama/ml/energy"
 )
 
 var grammarJSON = `
@@ -190,6 +191,14 @@ type llamaServerRunner struct {
 	splitDirs     []string
 
 	sem *semaphore.Weighted
+
+	// loading records the model load as GPU work until Load returns or the
+	// runner is closed.
+	loading *gpuWork
+	// energyMeter is opened by meter and closed by Close. It stays nil when
+	// the GPUs can't all be metered.
+	meterOnce   sync.Once
+	energyMeter energy.Meter
 
 	launch                  llamaServerLaunchConfig
 	output                  *memoryParsingWriter
@@ -1062,7 +1071,9 @@ func NewLlamaServerRunner(
 	// Point the memory parsing writer at this runner so values are updated as logs stream in
 	memWriter.runner = s
 
+	s.loading = startGPUWork(s.gpuIDs())
 	if err := s.startProcess(); err != nil {
+		s.loading.finish()
 		_ = s.removeSplitDirs()
 		msg := s.lastErrMsg()
 		return nil, fmt.Errorf("error starting llama-server: %v %s", err, msg)
@@ -1145,6 +1156,7 @@ func qwenVLServerArgs(modelArch string) []string {
 // llama-server before this point.
 func (s *llamaServerRunner) Load(ctx context.Context, systemInfo ml.SystemInfo, gpus []ml.DeviceInfo, _ bool) ([]ml.DeviceID, error) {
 	slog.Info("loading model via llama-server", "model", s.modelPath)
+	defer s.loading.finish()
 
 	if err := s.WaitUntilRunning(ctx); err != nil {
 		retried, retryErr := s.retryWithMMProjCPUOffload(err)
@@ -1171,6 +1183,10 @@ func (s *llamaServerRunner) Load(ctx context.Context, systemInfo ml.SystemInfo, 
 			"change in llama-server's log format — check for 'buffer size' lines in the output.",
 			"model", s.modelPath, "gpus", len(s.gpus))
 	}
+
+	// Open NVML now so the first request doesn't pay for it. The constructor
+	// runs under the scheduler's lock, so it shouldn't do it there.
+	s.meter()
 
 	if s.options.MainGPU != nil && *s.options.MainGPU >= 0 && *s.options.MainGPU < len(gpus) {
 		return []ml.DeviceID{gpus[*s.options.MainGPU].DeviceID}, nil
@@ -1831,6 +1847,9 @@ func (s *llamaServerRunner) Completion(ctx context.Context, req CompletionReques
 	}
 	serverReq.Header.Set("Content-Type", "application/json")
 
+	window := beginEnergyWindow(s.meter(), s.gpuIDs())
+	defer window.end()
+
 	res, err := s.httpClient().Do(serverReq)
 	if err != nil {
 		if errors.Is(err, context.Canceled) {
@@ -1923,6 +1942,7 @@ func (s *llamaServerRunner) Completion(ctx context.Context, req CompletionReques
 					PromptEvalDuration:    time.Duration(lsResp.Timings.PromptMS * float64(time.Millisecond)),
 					EvalCount:             lsResp.Timings.PredictN,
 					EvalDuration:          time.Duration(lsResp.Timings.PredictMS * float64(time.Millisecond)),
+					GPUEnergy:             window.end(),
 				}
 				hasFinalResp = true
 			}
@@ -2143,6 +2163,9 @@ func (s *llamaServerRunner) Chat(ctx context.Context, req ChatRequest, fn func(C
 	}
 	serverReq.Header.Set("Content-Type", "application/json")
 
+	window := beginEnergyWindow(s.meter(), s.gpuIDs())
+	defer window.end()
+
 	res, err := s.httpClient().Do(serverReq)
 	if err != nil {
 		if errors.Is(err, context.Canceled) {
@@ -2241,6 +2264,7 @@ func (s *llamaServerRunner) Chat(ctx context.Context, req ChatRequest, fn func(C
 				resp.PromptEvalDuration = time.Duration(lsResp.Timings.PromptMS * float64(time.Millisecond))
 				resp.EvalCount = lsResp.Timings.PredictN
 				resp.EvalDuration = time.Duration(lsResp.Timings.PredictMS * float64(time.Millisecond))
+				resp.GPUEnergy = window.end()
 				toolCalls, err := accumulatedToolCalls(toolCalls)
 				if err != nil {
 					return err
@@ -2600,6 +2624,10 @@ func (s *llamaServerRunner) Embedding(ctx context.Context, input string, media [
 	}
 	r.Header.Set("Content-Type", "application/json")
 
+	// Embeddings report no energy, but they still keep a concurrent
+	// generation on the same GPU from claiming the GPU's whole draw.
+	defer startGPUWork(s.gpuIDs()).finish()
+
 	resp, err := s.httpClient().Do(r)
 	if err != nil {
 		return nil, 0, fmt.Errorf("do embedding request: %w", err)
@@ -2805,8 +2833,31 @@ func (s *llamaServerRunner) Detokenize(ctx context.Context, tokens []int) (strin
 	return result.Content, nil
 }
 
+// gpuIDs returns the PCI bus IDs that the runner records its GPU work against.
+func (s *llamaServerRunner) gpuIDs() []string {
+	return gpuPCIIDs(s.gpus)
+}
+
+// meter returns the runner's energy meter, opening it on first use. After
+// Close it never opens one.
+func (s *llamaServerRunner) meter() energy.Meter {
+	s.meterOnce.Do(func() {
+		s.memoryMu.RLock()
+		layers := s.gpuLayers
+		s.memoryMu.RUnlock()
+		s.energyMeter = openEnergyMeter(s.gpus, layers)
+	})
+	return s.energyMeter
+}
+
 func (s *llamaServerRunner) Close() error {
-	return errors.Join(s.stopProcess(), s.removeSplitDirs())
+	err := errors.Join(s.stopProcess(), s.removeSplitDirs())
+	s.loading.finish()
+	s.meterOnce.Do(func() {})
+	if s.energyMeter != nil {
+		err = errors.Join(err, s.energyMeter.Close())
+	}
+	return err
 }
 
 func (s *llamaServerRunner) stopProcess() error {

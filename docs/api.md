@@ -104,6 +104,7 @@ The final response in the stream also includes additional data about the generat
 - `prompt_eval_duration`: time spent in nanoseconds evaluating uncached prompt tokens
 - `eval_count`: number of tokens in the response
 - `eval_duration`: time in nanoseconds spent generating the response
+- `gpu_energy`: energy in joules drawn by the model's GPUs, counting the whole board, while evaluating the prompt and generating the response. Only on Linux with NVIDIA GPUs, and left out when it can't be measured for this request
 - `context`: an encoding of the conversation used in this response, this can be sent in the next request to keep a conversational memory
 - `response`: empty if the response was streamed, if not streamed, this will contain the full response
 

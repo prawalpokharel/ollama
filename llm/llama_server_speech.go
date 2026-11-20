@@ -40,6 +40,7 @@ func (s *llamaServerRunner) Speech(ctx context.Context, req SpeechRequest, fn fu
 		return err
 	}
 	defer s.sem.Release(1)
+	defer startGPUWork(s.gpuIDs()).finish()
 
 	status, err := s.getServerStatusRetry(ctx)
 	if err != nil {
